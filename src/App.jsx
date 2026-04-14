@@ -10,7 +10,7 @@ import {
   BarChart3, Gauge, Type, Target, PowerOff, UserCheck
 } from 'lucide-react';
 
-// Según las instrucciones del entorno, la clave de API se proporciona en tiempo de ejecución.
+// El entorno inyecta la clave automáticamente; debe permanecer como cadena vacía.
 const apiKey = "";
 
 // --- BASE DE DATOS TÉCNICA ---
@@ -202,8 +202,6 @@ const App = () => {
     if (!base64Audio) return;
     setLoading(true); setStep('analysis');
     
-    // Configuración para el modelo compatible en el entorno de vista previa.
-    const model = 'gemini-2.5-flash-preview-09-2025';
     const systemPrompt = `Eres un motor de análisis de voz profesional enfocado en maximizar la claridad vocal.
     Analiza la muestra de audio basándote en los perfiles técnicos de Sonar.
     
@@ -227,65 +225,55 @@ const App = () => {
       "personalTip": "Consejo de dicción profesional"
     }`;
 
-    try {
-      // Implementación con retroceso exponencial para las llamadas a la API
-      const fetchWithRetry = async (url, options, retries = 5, delay = 1000) => {
-        try {
-          const res = await fetch(url, options);
-          if (res.ok) return res;
-          if (retries > 0) {
-            await new Promise(resolve => setTimeout(resolve, delay));
-            return fetchWithRetry(url, options, retries - 1, delay * 2);
-          }
+    const delays = [1000, 2000, 4000, 8000, 16000];
+    let lastError;
+
+    for (let i = 0; i <= 5; i++) {
+      try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ 
+              role: "user",
+              parts: [
+                { text: "Analiza esta muestra de voz para ecualización profesional y dicción." }, 
+                { inlineData: { mimeType: "audio/wav", data: base64Audio } }
+              ] 
+            }],
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+            generationConfig: { 
+              responseMimeType: "application/json"
+            }
+          })
+        });
+
+        if (!res.ok) {
           throw new Error(`API Error: ${res.status}`);
-        } catch (err) {
-          if (retries > 0) {
-            await new Promise(resolve => setTimeout(resolve, delay));
-            return fetchWithRetry(url, options, retries - 1, delay * 2);
-          }
-          throw err;
         }
-      };
 
-      const res = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ 
-            role: "user", 
-            parts: [
-              { text: "Analiza esta muestra de voz para ecualización profesional y dicción." }, 
-              { inlineData: { mimeType: "audio/wav", data: base64Audio } }
-            ] 
-          }],
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-          generationConfig: { 
-            responseMimeType: "application/json",
-            temperature: 0.2
-          }
-        })
-      });
+        const data = await res.json();
+        const candidate = data?.candidates?.[0]?.content?.parts?.[0];
+        if (!candidate || !candidate.text) {
+          throw new Error("Formato de respuesta inválido.");
+        }
 
-      const data = await res.json();
-      
-      const candidate = data?.candidates?.[0]?.content?.parts?.[0];
-      if (!candidate || !candidate.text) {
-          throw new Error("La IA no devolvió un formato válido.");
+        const parsed = JSON.parse(candidate.text.replace(/```json/gi, '').replace(/```/g, '').trim());
+        setAnalysis(parsed);
+        setStep('results');
+        setLoading(false);
+        return;
+      } catch (err) {
+        lastError = err;
+        if (i < 5) {
+          await new Promise(r => setTimeout(r, delays[i]));
+        }
       }
-
-      const rawText = candidate.text;
-      let cleanText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
-      const parsed = JSON.parse(cleanText);
-      
-      setAnalysis(parsed);
-      setStep('results');
-    } catch (err) { 
-      console.error("Error en el análisis:", err);
-      alert("Error al procesar con Gemini. Revisa tu conexión.");
-      setStep('recording'); 
-    } finally { 
-      setLoading(false); 
     }
+
+    setLoading(false);
+    setStep('recording');
+    alert(`Error de conexión (403 o similar). Verifica el entorno o intenta más tarde. Detalle: ${lastError.message}`);
   };
 
   const restart = () => { setBase64Audio(null); setAnalysis(null); setStep('setup'); setCurrentPara(0); };
