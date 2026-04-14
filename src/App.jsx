@@ -10,9 +10,10 @@ import {
   BarChart3, Gauge, Type, Target, PowerOff, UserCheck
 } from 'lucide-react';
 
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY;// Inyectado automáticamente en el entorno
+// Según las instrucciones del entorno, la clave de API se proporciona en tiempo de ejecución.
+const apiKey = "";
 
-// --- BASE DE DATOS TÉCNICA COMPLETA (Sincronizada con AJUSTES.csv proporcionados) ---
+// --- BASE DE DATOS TÉCNICA ---
 const SONAR_PRESETS_DATABASE = {
   "Custom": [
     { p: 1, g: 0.0, f: 31, q: 0.707 }, { p: 2, g: 0.0, f: 62, q: 0.707 }, { p: 3, g: 0.0, f: 125, q: 0.707 }, { p: 4, g: 0.0, f: 250, q: 0.707 }, { p: 5, g: 0.0, f: 500, q: 0.707 },
@@ -82,7 +83,7 @@ const BANDS = [
 
 const POINT_COLORS = ['#a855f7', '#6366f1', '#ec4899', '#ef4444', '#f97316', '#eab308', '#84cc16', '#06b6d4', '#3b82f6', '#2563eb'];
 
-// --- Componente de Gráfico de EQ Logarítmico Profesional ---
+// --- Componente de Gráfico ---
 const SonarFidelityGraph = ({ points, activePoint, onPointHover }) => {
   const width = 1000, height = 400, minFreq = 20, maxFreq = 20000, maxGain = 12;
   const fToX = (f) => (Math.log10(Math.max(f, minFreq)) - Math.log10(minFreq)) / (Math.log10(maxFreq) - Math.log10(minFreq)) * width;
@@ -184,8 +185,9 @@ const App = () => {
       audioChunksRef.current = [];
       mediaRecorderRef.current.ondataavailable = e => audioChunksRef.current.push(e.data);
       mediaRecorderRef.current.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
         const reader = new FileReader();
-        reader.readAsDataURL(new Blob(audioChunksRef.current, { type: 'audio/wav' }));
+        reader.readAsDataURL(blob);
         reader.onloadend = () => setBase64Audio(reader.result.split(',')[1]);
       };
       mediaRecorderRef.current.start();
@@ -200,69 +202,87 @@ const App = () => {
     if (!base64Audio) return;
     setLoading(true); setStep('analysis');
     
-    // --- AQUÍ ESTÁ INYECTADO TU NUEVO PROMPT MAESTRO ---
-    const systemPrompt = `Eres un motor de análisis de voz profesional enfocado en maximizar la claridad vocal para comunicación, manteniendo un sonido natural.
-    Tu tarea es analizar muestras de voz del usuario (evaluando dicción, rango medio y claridad general a través de sus 7 fases) y determinar la mejor configuración de audio basada en perfiles reales predefinidos.
-
-    RESTRICCIÓN CRÍTICA E INQUEBRANTABLE:
-    - NO puedes crear configuraciones de EQ desde cero.
-    - SOLO puedes usar los 14 perfiles proporcionados en DATOS REALES como base.
-    - La personalización (IA quirúrgica / customPoints) debe partir SIEMPRE de uno de esos 14 perfiles.
-    - Los valores de EQ personalizados deben respetar la estructura original (bandas, frecuencias base, Q). Solo puedes ajustar la ganancia (g) levemente (±1 a ±3 dB).
-    - Reglas de ajuste: Reducir 200–300Hz si hay 'muddy', Aumentar 2k–4k si falta claridad, Reducir 5k–8k si hay sibilancia. No ajustes de forma extrema.
-
-    METODOLOGÍA DE ANÁLISIS:
-    Fase 1: Clasifica la voz (Grave/aguda, Opaca/clara, Nasal/balanceada, Limpia/ruidosa) analizando SNR, presencia, graves, sibilancia y dinámica.
-    Fase 2: Evalúa los 14 perfiles exactos y calcula un score.
-    Fase 3: Selecciona el mejor perfil oficial (suggestedPreset).
-    Fase 4: Aplica IA Quirúrgica creando 'customPoints' a partir del perfil base, con ajustes sutiles.
-    Fase 5: Define el veredicto final.
-
-    RESTRICCIONES TÉCNICAS ADICIONALES:
-    1. COMPRESIÓN: Apagada (OFF).
-    2. NOISE GATE (ClearCast AI): Entre 50% y 85% para eliminar ruido sin sonar robótico.
-    3. DATOS REALES CARGADOS: ${JSON.stringify(SONAR_PRESETS_DATABASE)}
+    // Configuración para el modelo compatible en el entorno de vista previa.
+    const model = 'gemini-2.5-flash-preview-09-2025';
+    const systemPrompt = `Eres un motor de análisis de voz profesional enfocado en maximizar la claridad vocal.
+    Analiza la muestra de audio basándote en los perfiles técnicos de Sonar.
     
-    DEBES RESPONDER ÚNICAMENTE CON UN JSON VÁLIDO CON ESTE FORMATO:
+    RESTRICCIONES TÉCNICAS:
+    1. Perfiles Disponibles: ${Object.keys(SONAR_PRESETS_DATABASE).join(', ')}.
+    2. Compresión: OFF.
+    3. Noise Gate: Automático (50-85%).
+    4. Base de Datos EQ: ${JSON.stringify(SONAR_PRESETS_DATABASE)}.
+    
+    RESPONDE ÚNICAMENTE CON UN JSON VÁLIDO:
     {
-      "suggestedPreset": "Nombre exacto de uno de los 14 perfiles",
+      "suggestedPreset": "Nombre exacto de la base de datos",
       "customPoints": [{"p": 1, "g": 2.0, "f": 125, "q": 0.707}], 
-      "profile": "Clasificación de la voz (ej. Grave y Limpia)",
+      "profile": "Clasificación de voz (ej. Grave y Limpia)",
       "scores": {"diction": 80, "fluidity": 75, "clarity": 70},
       "suggestedClearCast": 50,
       "customClearCast": 65,
       "pureIaClearCast": 75,
       "smartVolume": "Medium",
-      "sonarAdvice": "Por qué la opción sugerida es superior (comparando Sin filtros vs Base vs Quirúrgica).",
-      "personalTip": "Consejo maestro final"
+      "sonarAdvice": "Resumen técnico de por qué este perfil.",
+      "personalTip": "Consejo de dicción profesional"
     }`;
 
     try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+      // Implementación con retroceso exponencial para las llamadas a la API
+      const fetchWithRetry = async (url, options, retries = 5, delay = 1000) => {
+        try {
+          const res = await fetch(url, options);
+          if (res.ok) return res;
+          if (retries > 0) {
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return fetchWithRetry(url, options, retries - 1, delay * 2);
+          }
+          throw new Error(`API Error: ${res.status}`);
+        } catch (err) {
+          if (retries > 0) {
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return fetchWithRetry(url, options, retries - 1, delay * 2);
+          }
+          throw err;
+        }
+      };
+
+      const res = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: "Realiza la auditoría vocal. Sigue las restricciones CRÍTICAS al pie de la letra y no alteres frecuencias base ni factor Q en los customPoints, solo la ganancia." }, { inlineData: { mimeType: "audio/wav", data: base64Audio } }] }],
+          contents: [{ 
+            role: "user", 
+            parts: [
+              { text: "Analiza esta muestra de voz para ecualización profesional y dicción." }, 
+              { inlineData: { mimeType: "audio/wav", data: base64Audio } }
+            ] 
+          }],
           systemInstruction: { parts: [{ text: systemPrompt }] },
-          generationConfig: { responseMimeType: "application/json" }
+          generationConfig: { 
+            responseMimeType: "application/json",
+            temperature: 0.2
+          }
         })
       });
+
       const data = await res.json();
-      const rawText = data.candidates[0].content.parts[0].text;
       
-      // Limpieza para evitar que Gemini rompa el JSON
-      let cleanText = rawText;
-      if (rawText.includes('```')) {
-         cleanText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const candidate = data?.candidates?.[0]?.content?.parts?.[0];
+      if (!candidate || !candidate.text) {
+          throw new Error("La IA no devolvió un formato válido.");
       }
-      
+
+      const rawText = candidate.text;
+      let cleanText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(cleanText);
+      
       setAnalysis(parsed);
       setStep('results');
     } catch (err) { 
+      console.error("Error en el análisis:", err);
+      alert("Error al procesar con Gemini. Revisa tu conexión.");
       setStep('recording'); 
-      alert("Hubo un error evaluando el JSON de la IA. Por favor, reintenta.");
-      console.error(err);
     } finally { 
       setLoading(false); 
     }
@@ -280,9 +300,9 @@ const App = () => {
 
   const currentClearCast = useMemo(() => {
     if (!analysis) return 0;
-    if (graphView === 'official') return analysis.suggestedClearCast;
-    if (graphView === 'tailor-made') return analysis.customClearCast;
-    return analysis.pureIaClearCast;
+    if (graphView === 'official') return analysis.suggestedClearCast || 50;
+    if (graphView === 'tailor-made') return analysis.customClearCast || 60;
+    return analysis.pureIaClearCast || 75;
   }, [analysis, graphView]);
 
   return (
@@ -303,24 +323,24 @@ const App = () => {
         {step === 'setup' && (
           <div className="text-center py-32 space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-700">
             <h2 className="text-8xl font-black text-white italic uppercase tracking-tighter leading-none">Voz Maestra Pro</h2>
-            <p className="text-slate-500 max-w-2xl mx-auto text-xl font-medium leading-relaxed italic leading-tight">Auditoría avanzada (Compresión OFF / Gate AUTO). Aislamiento real desde el 50% de intensidad IA para eliminar el ruido ambiente.</p>
+            <p className="text-slate-500 max-w-2xl mx-auto text-xl font-medium italic">Análisis avanzado con tecnología inteligente. Obtén tu ecualización perfecta en segundos.</p>
             <button onClick={initMic} className="px-16 py-6 bg-indigo-600 text-white font-black rounded-2xl hover:bg-indigo-500 transition-all text-xs tracking-widest uppercase shadow-xl active:scale-95">INICIAR AUDITORÍA QUIRÚRGICA</button>
           </div>
         )}
 
         {step === 'instructions' && (
           <div className="max-w-4xl mx-auto space-y-12 animate-in fade-in duration-500">
-            <div className="text-center space-y-4"><h2 className="text-4xl font-bold text-white uppercase italic tracking-tighter">Protocolo Pro</h2><p className="text-slate-500 text-lg">Una captura impecable garantiza una dicción cristalina.</p></div>
+            <div className="text-center space-y-4"><h2 className="text-4xl font-bold text-white uppercase italic tracking-tighter">Protocolo Pro</h2><p className="text-slate-500 text-lg">Lee las frases con voz natural para una calibración exacta.</p></div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              {[{ icon: <ShieldCheck />, title: "Aislamiento Real", desc: "Mínimo 50% para silenciar a los demás." }, { icon: <Activity />, title: "Fluidez", desc: "Consistencia profesional sin compresión." }, { icon: <UserCheck />, title: "Natural", desc: "Modo IA sin filtros para máxima fidelidad." }].map((item, i) => (
+              {[{ icon: <ShieldCheck />, title: "Aislamiento Real", desc: "Mínimo 50% para silenciar ruidos externos." }, { icon: <Activity />, title: "Fluidez", desc: "Sin compresión agresiva." }, { icon: <UserCheck />, title: "Fidelidad", desc: "Captura pura sin filtros previos." }].map((item, i) => (
                 <div key={i} className="p-8 bg-[#0d111a] border border-slate-800/60 rounded-[2.5rem] space-y-4 group hover:border-indigo-500 transition-all shadow-xl">
                   <div className="text-indigo-500 transition-all">{item.icon}</div>
                   <h4 className="font-bold text-sm text-white uppercase tracking-widest">{item.title}</h4>
-                  <p className="text-xs text-slate-400 leading-relaxed leading-tight">{item.desc}</p>
+                  <p className="text-xs text-slate-400 leading-relaxed">{item.desc}</p>
                 </div>
               ))}
             </div>
-            <button onClick={() => setStep('recording')} className="w-full py-8 bg-white text-black font-black rounded-[2.5rem] flex items-center justify-center gap-4 hover:bg-slate-200 transition-all uppercase tracking-widest text-xs shadow-2xl">ESTOY LISTO <ChevronRight className="w-5 h-5" /></button>
+            <button onClick={() => setStep('recording')} className="w-full py-8 bg-white text-black font-black rounded-[2.5rem] flex items-center justify-center gap-4 hover:bg-slate-200 transition-all uppercase tracking-widest text-xs shadow-2xl">EMPEZAR LECTURA <ChevronRight className="w-5 h-5" /></button>
           </div>
         )}
 
@@ -329,24 +349,27 @@ const App = () => {
             <div className="bg-[#0b0e14] border border-slate-900 rounded-[4rem] p-20 text-center relative shadow-2xl overflow-hidden backdrop-blur-xl">
               <div className="absolute top-12 left-1/2 -translate-x-1/2 flex gap-4">{script.map((_, i) => <div key={i} className={`h-2 rounded-full transition-all duration-700 ${i === currentPara ? 'w-16 bg-indigo-600 shadow-[0_0_15px_#4f46e5]' : 'w-5 bg-slate-800'}`} />)}</div>
               <div className="py-16 space-y-12">
-                <div className="inline-flex px-6 py-2 bg-black border border-slate-800 rounded-full text-[11px] font-black text-slate-500 uppercase tracking-[0.5em] italic leading-tight">{script[currentPara].title}</div>
-                <p className="text-6xl font-bold leading-tight text-white italic drop-shadow-xl leading-tight">"{script[currentPara].text}"</p>
+                <div className="inline-flex px-6 py-2 bg-black border border-slate-800 rounded-full text-[11px] font-black text-slate-500 uppercase tracking-[0.5em] italic">{script[currentPara].title}</div>
+                <p className="text-6xl font-bold leading-tight text-white italic drop-shadow-xl">"{script[currentPara].text}"</p>
                 <p className="text-sm font-bold text-indigo-400 flex items-center justify-center gap-3 italic"><Zap className="w-5 h-5" /> {script[currentPara].instruction}</p>
               </div>
-              {!isRecording ? <button onClick={startRecording} className="px-24 py-10 bg-indigo-600 text-white font-black rounded-full shadow-2xl hover:scale-105 transition-all text-sm tracking-widest uppercase italic font-bold">INICIAR Stress Test</button> :
+              {!isRecording ? <button onClick={startRecording} className="px-24 py-10 bg-indigo-600 text-white font-black rounded-full shadow-2xl hover:scale-105 transition-all text-sm tracking-widest uppercase italic">ACTIVAR MICRÓFONO</button> :
                 <div className="flex gap-8 justify-center">
                   <button onClick={() => setCurrentPara(p => Math.max(0, p - 1))} disabled={currentPara === 0} className="p-8 bg-slate-900 rounded-full border border-slate-800 disabled:opacity-20 hover:bg-slate-800 transition-all shadow-lg"><ChevronLeft className="w-8 h-8 text-white" /></button>
-                  {currentPara < script.length - 1 ? <button onClick={() => setCurrentPara(p => p + 1)} className="px-16 py-8 bg-indigo-100 text-black font-black rounded-full text-xs tracking-widest uppercase shadow-xl font-bold">SIGUIENTE FASE</button> :
-                    <button onClick={stopAndAnalyze} className="px-16 py-8 bg-red-600 text-white font-black rounded-full text-xs tracking-widest uppercase shadow-xl animate-pulse">TERMINAR AUDITORÍA</button>}
+                  {currentPara < script.length - 1 ? <button onClick={() => setCurrentPara(p => p + 1)} className="px-16 py-8 bg-indigo-100 text-black font-black rounded-full text-xs tracking-widest uppercase shadow-xl">SIGUIENTE FRASE</button> :
+                    <button onClick={stopAndAnalyze} className="px-16 py-8 bg-red-600 text-white font-black rounded-full text-xs tracking-widest uppercase shadow-xl animate-pulse">TERMINAR CAPTURA</button>}
                 </div>
               }
             </div>
-            {base64Audio && !isRecording && <button onClick={runAnalysis} className="w-full py-10 bg-indigo-600 text-white font-black rounded-[3rem] shadow-2xl text-sm tracking-[0.3em] uppercase hover:bg-indigo-500 transition-all flex items-center justify-center gap-6 font-bold italic">CALCULAR PERFIL DINÁMICO PROFESIONAL</button>}
+            {base64Audio && !isRecording && <button onClick={runAnalysis} className="w-full py-10 bg-indigo-600 text-white font-black rounded-[3rem] shadow-2xl text-sm tracking-[0.3em] uppercase hover:bg-indigo-500 transition-all flex items-center justify-center gap-6 italic">PROCESAR ANÁLISIS</button>}
           </div>
         )}
 
         {step === 'analysis' && (
-          <div className="h-[60vh] flex flex-col items-center justify-center space-y-12 animate-in fade-in duration-500 text-center"><div className="relative mx-auto"><div className="w-32 h-32 border-[6px] border-slate-900 border-t-indigo-600 rounded-full animate-spin" /><Activity className="absolute inset-0 m-auto w-10 h-10 text-indigo-500 animate-pulse" /></div><h2 className="text-4xl font-black text-white italic uppercase tracking-tighter animate-pulse leading-tight">Aplicando IA Quirúrgica...</h2></div>
+          <div className="h-[60vh] flex flex-col items-center justify-center space-y-12 animate-in fade-in duration-500 text-center">
+            <div className="relative mx-auto"><div className="w-32 h-32 border-[6px] border-slate-900 border-t-indigo-600 rounded-full animate-spin" /><Activity className="absolute inset-0 m-auto w-10 h-10 text-indigo-500 animate-pulse" /></div>
+            <h2 className="text-4xl font-black text-white italic uppercase tracking-tighter animate-pulse">Analizando Frecuencias...</h2>
+          </div>
         )}
 
         {step === 'results' && analysis && (
@@ -354,9 +377,9 @@ const App = () => {
             
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                {[
-                 { label: "Dicción", val: analysis.scores.diction, icon: <Type />, color: "text-green-400" },
-                 { label: "Fluidez", val: analysis.scores.fluidity, icon: <Activity />, color: "text-indigo-400" },
-                 { label: "Claridad", val: analysis.scores.clarity, icon: <Sparkles />, color: "text-blue-400" }
+                 { label: "Dicción", val: analysis.scores?.diction || 0, icon: <Type />, color: "text-green-400" },
+                 { label: "Fluidez", val: analysis.scores?.fluidity || 0, icon: <Activity />, color: "text-indigo-400" },
+                 { label: "Claridad", val: analysis.scores?.clarity || 0, icon: <Sparkles />, color: "text-blue-400" }
                ].map((m, i) => (
                  <div key={i} className="bg-[#0b0e14] p-10 rounded-[3.5rem] border border-slate-900 shadow-xl flex flex-col items-center text-center space-y-4">
                     <div className={`${m.color} bg-black/40 p-4 rounded-2xl`}>{m.icon}</div>
@@ -369,28 +392,32 @@ const App = () => {
                ))}
             </div>
 
-            <div className="bg-[#0b0e14] p-16 rounded-[4.5rem] border border-slate-900 shadow-2xl relative overflow-hidden text-center space-y-12">
+            <div className="bg-[#0b0e14] p-8 md:p-16 rounded-[4.5rem] border border-slate-900 shadow-2xl relative overflow-hidden text-center space-y-12">
               <div className="absolute top-0 left-0 w-3 h-full bg-indigo-600"></div>
-              <div className="inline-flex items-center gap-3 px-6 py-2.5 rounded-full bg-black border border-slate-800 text-green-500 text-[12px] font-black uppercase tracking-[0.4em] shadow-lg italic leading-tight"><CheckCircle className="w-4 h-4" /> Veredicto Maestro Finalizado</div>
-              <h2 className="text-[10rem] font-black italic uppercase tracking-tighter text-white drop-shadow-2xl leading-none">{graphView === 'pure-ia' ? "MODO NATURAL" : String(analysis.suggestedPreset)}</h2>
+              <div className="inline-flex items-center gap-3 px-6 py-2.5 rounded-full bg-black border border-slate-800 text-green-500 text-[12px] font-black uppercase tracking-[0.4em] italic shadow-lg">
+                <CheckCircle className="w-4 h-4" /> Veredicto Maestro
+              </div>
+              <h2 className="text-5xl md:text-8xl font-black italic uppercase tracking-tighter text-white drop-shadow-2xl leading-none">
+                {graphView === 'pure-ia' ? "MODO NATURAL" : String(analysis.suggestedPreset)}
+              </h2>
               
               <div className="pt-10">
                 <div className="flex justify-center mb-10">
                   <div className="bg-black p-2 rounded-3xl border border-slate-800 flex flex-wrap justify-center gap-2 shadow-inner">
-                    <button onClick={() => setGraphView('official')} className={`px-10 py-5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-3 ${graphView === 'official' ? 'bg-indigo-600 text-white shadow-xl font-bold' : 'text-slate-500 hover:text-white'}`}><Database className="w-4 h-4" /> PRESET OFICIAL</button>
-                    <button onClick={() => setGraphView('tailor-made')} className={`px-10 py-5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-3 ${graphView === 'tailor-made' ? 'bg-[#1ae1af] text-black shadow-xl font-bold' : 'text-slate-500 hover:text-white'}`}><Wand2 className="w-4 h-4" /> AJUSTE QUIRÚRGICO</button>
-                    <button onClick={() => setGraphView('pure-ia')} className={`px-10 py-5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-3 ${graphView === 'pure-ia' ? 'bg-orange-500 text-white shadow-xl font-bold' : 'text-slate-500 hover:text-white'}`}><UserCheck className="w-4 h-4" /> SOLO IA (SIN EQ)</button>
+                    <button onClick={() => setGraphView('official')} className={`px-10 py-5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-3 ${graphView === 'official' ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-500 hover:text-white'}`}><Database className="w-4 h-4" /> PRESET OFICIAL</button>
+                    <button onClick={() => setGraphView('tailor-made')} className={`px-10 py-5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-3 ${graphView === 'tailor-made' ? 'bg-[#1ae1af] text-black shadow-xl' : 'text-slate-500 hover:text-white'}`}><Wand2 className="w-4 h-4" /> AJUSTE PERSONALIZADO</button>
+                    <button onClick={() => setGraphView('pure-ia')} className={`px-10 py-5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-3 ${graphView === 'pure-ia' ? 'bg-orange-500 text-white shadow-xl' : 'text-slate-500 hover:text-white'}`}><UserCheck className="w-4 h-4" /> SOLO IA (SIN EQ)</button>
                   </div>
                 </div>
                 <SonarFidelityGraph points={currentPoints} activePoint={hoveredPoint} onPointHover={setHoveredPoint} />
                 
-                <div className="bg-black/60 rounded-[3rem] border border-slate-800 p-10 mt-8 shadow-inner">
-                   <div className="grid grid-cols-2 md:grid-cols-5 gap-6">
+                <div className="bg-black/60 rounded-[3rem] border border-slate-800 p-8 md:p-10 mt-8 shadow-inner overflow-x-auto">
+                   <div className="flex md:grid md:grid-cols-5 gap-6 min-w-max md:min-w-0">
                       {currentPoints.map((p, i) => (
-                        <div key={i} className={`p-5 rounded-2xl border text-left space-y-2 group transition-all ${graphView === 'pure-ia' ? 'opacity-30 grayscale' : 'bg-slate-900/40 border-slate-800/60 hover:border-indigo-500'}`}>
-                           <span className="text-[10px] font-black text-slate-500 uppercase leading-tight">Punto {i+1}</span>
+                        <div key={i} className={`p-5 rounded-2xl border text-left space-y-2 group transition-all w-40 md:w-full ${graphView === 'pure-ia' ? 'opacity-30 grayscale' : 'bg-slate-900/40 border-slate-800/60 hover:border-indigo-500'}`}>
+                           <span className="text-[10px] font-black text-slate-500 uppercase">Punto {i+1}</span>
                            <div className="text-xl font-black text-white italic">{p.g > 0 ? `+${p.g.toFixed(1)}` : p.g.toFixed(1)}<span className="text-[10px] not-italic ml-1 text-slate-400 font-bold">dB</span></div>
-                           <div className="text-[10px] font-bold text-indigo-400 uppercase tracking-tighter italic">{p.f >= 1000 ? (p.f/1000).toFixed(2)+'k' : p.f}Hz / Q:{p.q}</div>
+                           <div className="text-[10px] font-bold text-indigo-400 uppercase tracking-tighter italic">{p.f >= 1000 ? (p.f/1000).toFixed(1)+'k' : p.f}Hz</div>
                         </div>
                       ))}
                    </div>
@@ -399,37 +426,37 @@ const App = () => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-12 pt-10">
-              <div className="bg-[#0b0e14] p-16 rounded-[4.5rem] border border-slate-900 space-y-10 shadow-2xl flex flex-col justify-between">
-                <div className="flex items-center justify-between"><h4 className="text-[11px] font-black text-indigo-500 uppercase tracking-widest flex items-center gap-4 tracking-[0.4em] italic leading-tight"><MessageSquare className="w-6 h-6"/> Análisis de Dicción Pro</h4></div>
-                <div className="space-y-8"><p className="text-3xl text-white font-bold leading-relaxed italic pr-4 opacity-90 leading-tight">"{String(analysis.sonarAdvice)}"</p>
-                  <div className="pt-10 border-t border-slate-800 space-y-6"><p className="text-[11px] text-slate-500 uppercase font-black tracking-widest flex items-center gap-4"><Heart className="w-6 h-6 fill-current text-indigo-600" /> Detalle Maestro:</p><p className="text-sm text-slate-200 font-bold bg-black p-10 rounded-[3rem] border border-slate-800 italic shadow-inner leading-relaxed">"{String(analysis.personalTip)}"</p></div>
+              <div className="bg-[#0b0e14] p-10 md:p-16 rounded-[4.5rem] border border-slate-900 space-y-10 shadow-2xl flex flex-col justify-between">
+                <div className="flex items-center justify-between"><h4 className="text-[11px] font-black text-indigo-500 uppercase tracking-widest flex items-center gap-4 italic"><MessageSquare className="w-6 h-6"/> Análisis de Voz</h4></div>
+                <div className="space-y-8"><p className="text-2xl text-white font-bold italic opacity-90">"{String(analysis.sonarAdvice || 'Análisis finalizado exitosamente.')}"</p>
+                  <div className="pt-10 border-t border-slate-800 space-y-6">
+                    <p className="text-[11px] text-slate-500 uppercase font-black tracking-widest flex items-center gap-4"><Heart className="w-6 h-6 fill-current text-indigo-600" /> Consejo Maestro:</p>
+                    <p className="text-sm text-slate-200 font-bold bg-black p-8 md:p-10 rounded-[3rem] border border-slate-800 italic shadow-inner">"{String(analysis.personalTip || 'Mantén tu distancia actual con el micrófono.')}"</p>
+                  </div>
                 </div>
-                <button onClick={restart} className="w-full py-8 bg-indigo-600 text-white font-black rounded-3xl mt-10 uppercase tracking-widest text-xs hover:bg-indigo-500 transition-all shadow-xl font-bold italic">REPETIR AUDITORÍA QUIRÚRGICA</button>
+                <button onClick={restart} className="w-full py-8 bg-indigo-600 text-white font-black rounded-3xl mt-10 uppercase tracking-widest text-xs hover:bg-indigo-500 transition-all shadow-xl font-bold">REINTENTAR CALIBRACIÓN</button>
               </div>
 
-              <div className="bg-[#0b0e14] p-16 rounded-[4.5rem] border border-slate-900 flex flex-col justify-between shadow-2xl relative overflow-hidden">
-                <h4 className="text-[11px] font-black text-indigo-400 uppercase tracking-widest mb-14 flex items-center gap-4 tracking-[0.4em] italic leading-tight">Módulos Pro (Comp OFF / Gate AUTO)</h4>
+              <div className="bg-[#0b0e14] p-10 md:p-16 rounded-[4.5rem] border border-slate-900 flex flex-col justify-between shadow-2xl relative overflow-hidden">
+                <h4 className="text-[11px] font-black text-indigo-400 uppercase tracking-widest mb-14 flex items-center gap-4 italic">Filtros Inteligentes</h4>
                 <div className="grid grid-cols-1 gap-10 py-4">
                   <div className="p-8 bg-black/60 rounded-[3rem] border border-zinc-800 flex items-center justify-between group hover:border-indigo-500 transition-all shadow-xl">
-                    <div className="flex items-center gap-6"><div className="bg-green-600/20 p-4 rounded-2xl"><Waves className="w-6 h-6 text-green-500" /></div><div><span className="text-[10px] font-black text-slate-500 uppercase mb-1 block leading-tight">Smart Volume (Consistencia)</span><span className="text-2xl font-black text-white italic">{analysis.smartVolume}</span></div></div>
+                    <div className="flex items-center gap-6"><div className="bg-green-600/20 p-4 rounded-2xl"><Waves className="w-6 h-6 text-green-500" /></div><div><span className="text-[10px] font-black text-slate-500 uppercase mb-1 block">Smart Volume</span><span className="text-2xl font-black text-white italic">{analysis.smartVolume || 'Medium'}</span></div></div>
                   </div>
                   <div className="p-8 bg-black/60 rounded-[3rem] border border-zinc-800 flex items-center justify-between group hover:border-indigo-500 transition-all shadow-xl">
-                    <div className="flex items-center gap-6"><div className="bg-indigo-600/20 p-4 rounded-2xl"><Cpu className="w-6 h-6 text-indigo-500" /></div><div><span className="text-[10px] font-black text-slate-500 uppercase mb-1 block leading-tight">Noise Gate (Aislamiento)</span><span className="text-2xl font-black text-white italic uppercase tracking-tighter font-bold">AUTOMÁTICO</span></div></div>
+                    <div className="flex items-center gap-6"><div className="bg-indigo-600/20 p-4 rounded-2xl"><Cpu className="w-6 h-6 text-indigo-500" /></div><div><span className="text-[10px] font-black text-slate-500 uppercase mb-1 block">Gate Aislamiento</span><span className="text-2xl font-black text-white italic font-bold">AUTOMÁTICO</span></div></div>
                   </div>
                   <div className="space-y-10 pt-10 border-t border-zinc-800">
                     <div className="flex justify-between items-end px-4">
-                      <span className="text-[11rem] font-black text-white tracking-tighter leading-none">{currentClearCast}%</span>
+                      <span className="text-7xl md:text-9xl font-black text-white tracking-tighter leading-none">{currentClearCast}%</span>
                       <div className="flex flex-col items-end pb-6">
-                         <span className="text-[13px] font-black text-slate-500 uppercase mb-2 leading-tight">ClearCast AI</span>
-                         <span className="text-[11px] font-black text-indigo-500 uppercase tracking-widest animate-pulse italic leading-tight">Rango: 50% - 85%</span>
+                         <span className="text-[13px] font-black text-slate-500 uppercase mb-2">ClearCast AI</span>
+                         <span className="text-[11px] font-black text-indigo-500 uppercase tracking-widest animate-pulse italic">Aislamiento Inteligente</span>
                       </div>
                     </div>
                     <div className="w-full bg-black h-7 rounded-full overflow-hidden border border-zinc-800 p-1.5 shadow-inner">
                       <div className="bg-indigo-600 h-full rounded-full transition-all duration-[3000ms] shadow-[0_0_25px_#4f46e5]" style={{width: `${currentClearCast}%`}}></div>
                     </div>
-                    <p className="text-[10px] text-zinc-500 font-bold text-center uppercase tracking-widest italic pr-2 leading-relaxed">
-                      El aislamiento efectivo garantizado empieza al 50%.
-                    </p>
                   </div>
                 </div>
               </div>
