@@ -10,7 +10,7 @@ import {
   BarChart3, Gauge, Type, Target, PowerOff, UserCheck
 } from 'lucide-react';
 
-const apiKey = import.meta.env.AIzaSyDWowohztmhHNhOv1ePR4-W0ojiXlns-zk; // Inyectado automáticamente en el entorno
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY; // Inyectado automáticamente en el entorno
 
 // --- BASE DE DATOS TÉCNICA COMPLETA (Sincronizada con AJUSTES.csv proporcionados) ---
 const SONAR_PRESETS_DATABASE = {
