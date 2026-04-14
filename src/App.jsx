@@ -10,8 +10,9 @@ import {
   BarChart3, Gauge, Type, Target, PowerOff, UserCheck
 } from 'lucide-react';
 
-// El entorno inyecta la clave automáticamente; debe permanecer como cadena vacía.
-const apiKey = "AIzaSyDWowohztmhHNhOv1ePR4-W0ojiXlns-zk";
+// Si usas este código en Netlify, asegúrate de que la variable de entorno esté configurada.
+// El entorno de Canvas inyecta la clave automáticamente si está vacía.
+const apiKey = ""; 
 
 // --- BASE DE DATOS TÉCNICA ---
 const SONAR_PRESETS_DATABASE = {
@@ -83,7 +84,6 @@ const BANDS = [
 
 const POINT_COLORS = ['#a855f7', '#6366f1', '#ec4899', '#ef4444', '#f97316', '#eab308', '#84cc16', '#06b6d4', '#3b82f6', '#2563eb'];
 
-// --- Componente de Gráfico ---
 const SonarFidelityGraph = ({ points, activePoint, onPointHover }) => {
   const width = 1000, height = 400, minFreq = 20, maxFreq = 20000, maxGain = 12;
   const fToX = (f) => (Math.log10(Math.max(f, minFreq)) - Math.log10(minFreq)) / (Math.log10(maxFreq) - Math.log10(minFreq)) * width;
@@ -143,6 +143,7 @@ const App = () => {
   const [analysis, setAnalysis] = useState(null);
   const [loading, setLoading] = useState(false);
   const [base64Audio, setBase64Audio] = useState(null);
+  const [audioMimeType, setAudioMimeType] = useState('audio/webm');
   const [hoveredPoint, setHoveredPoint] = useState(null);
   const [graphView, setGraphView] = useState('official'); 
   
@@ -181,11 +182,19 @@ const App = () => {
         if (volBarRef.current) volBarRef.current.style.height = `${(currentMax / 255) * 100}%`;
         if (isRecording) requestAnimationFrame(updateVisualizer);
       };
-      mediaRecorderRef.current = new MediaRecorder(stream);
+
+      // Detectar formato soportado
+      const options = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
+        ? { mimeType: 'audio/webm;codecs=opus' } 
+        : { mimeType: 'audio/ogg;codecs=opus' };
+      
+      setAudioMimeType(options.mimeType.split(';')[0]);
+
+      mediaRecorderRef.current = new MediaRecorder(stream, options);
       audioChunksRef.current = [];
       mediaRecorderRef.current.ondataavailable = e => audioChunksRef.current.push(e.data);
       mediaRecorderRef.current.onstop = () => {
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+        const blob = new Blob(audioChunksRef.current, { type: options.mimeType });
         const reader = new FileReader();
         reader.readAsDataURL(blob);
         reader.onloadend = () => setBase64Audio(reader.result.split(',')[1]);
@@ -202,43 +211,36 @@ const App = () => {
     if (!base64Audio) return;
     setLoading(true); setStep('analysis');
     
-    const systemPrompt = `Eres un motor de análisis de voz profesional enfocado en maximizar la claridad vocal.
-    Analiza la muestra de audio basándote en los perfiles técnicos de Sonar.
+    // Simplificamos el prompt para evitar errores de parseo y aseguramos que el sistema sepa que recibe audio multimodal
+    const systemPrompt = `Eres un motor de análisis de voz profesional. Tu salida debe ser exclusivamente JSON.
+    Analiza el audio y sugiere un preset de Sonar.
+    Presets: ${Object.keys(SONAR_PRESETS_DATABASE).join(', ')}.
+    Usa estos datos técnicos: ${JSON.stringify(SONAR_PRESETS_DATABASE)}.
     
-    RESTRICCIONES TÉCNICAS:
-    1. Perfiles Disponibles: ${Object.keys(SONAR_PRESETS_DATABASE).join(', ')}.
-    2. Compresión: OFF.
-    3. Noise Gate: Automático (50-85%).
-    4. Base de Datos EQ: ${JSON.stringify(SONAR_PRESETS_DATABASE)}.
-    
-    RESPONDE ÚNICAMENTE CON UN JSON VÁLIDO:
+    ESTRUCTURA JSON REQUERIDA:
     {
-      "suggestedPreset": "Nombre exacto de la base de datos",
+      "suggestedPreset": "Nombre exacto",
       "customPoints": [{"p": 1, "g": 2.0, "f": 125, "q": 0.707}], 
-      "profile": "Clasificación de voz (ej. Grave y Limpia)",
-      "scores": {"diction": 80, "fluidity": 75, "clarity": 70},
+      "profile": "Breve descripción",
+      "scores": {"diction": 85, "fluidity": 80, "clarity": 75},
       "suggestedClearCast": 50,
       "customClearCast": 65,
       "pureIaClearCast": 75,
       "smartVolume": "Medium",
-      "sonarAdvice": "Resumen técnico de por qué este perfil.",
-      "personalTip": "Consejo de dicción profesional"
+      "sonarAdvice": "Explicación técnica",
+      "personalTip": "Consejo maestro"
     }`;
 
-    const delays = [1000, 2000, 4000, 8000, 16000];
-    let lastError;
-
-    for (let i = 0; i <= 5; i++) {
+    const callApiWithRetry = async (retries = 5, delay = 1000) => {
       try {
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ 
-              role: "user",
               parts: [
-                { text: "Analiza esta muestra de voz para ecualización profesional y dicción." }, 
-                { inlineData: { mimeType: "audio/wav", data: base64Audio } }
+                { text: "Analiza este audio y devuelve el JSON de calibración basado en las instrucciones del sistema." }, 
+                { inlineData: { mimeType: audioMimeType, data: base64Audio } }
               ] 
             }],
             systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -248,32 +250,33 @@ const App = () => {
           })
         });
 
-        if (!res.ok) {
-          throw new Error(`API Error: ${res.status}`);
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error?.message || `Status ${response.status}`);
         }
 
-        const data = await res.json();
-        const candidate = data?.candidates?.[0]?.content?.parts?.[0];
-        if (!candidate || !candidate.text) {
-          throw new Error("Formato de respuesta inválido.");
-        }
+        const result = await response.json();
+        const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+        
+        if (!text) throw new Error("La IA no devolvió contenido.");
 
-        const parsed = JSON.parse(candidate.text.replace(/```json/gi, '').replace(/```/g, '').trim());
+        const parsed = JSON.parse(text.trim());
         setAnalysis(parsed);
         setStep('results');
         setLoading(false);
-        return;
-      } catch (err) {
-        lastError = err;
-        if (i < 5) {
-          await new Promise(r => setTimeout(r, delays[i]));
-        }
-      }
-    }
 
-    setLoading(false);
-    setStep('recording');
-    alert(`Error de conexión (403 o similar). Verifica el entorno o intenta más tarde. Detalle: ${lastError.message}`);
+      } catch (err) {
+        if (retries > 0) {
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return callApiWithRetry(retries - 1, delay * 2);
+        }
+        setLoading(false);
+        setStep('recording');
+        alert(`Error Crítico (400/Bad Request): ${err.message}. Verifica que tu API Key sea correcta y que el audio no sea demasiado largo.`);
+      }
+    };
+
+    await callApiWithRetry();
   };
 
   const restart = () => { setBase64Audio(null); setAnalysis(null); setStep('setup'); setCurrentPara(0); };
@@ -311,7 +314,7 @@ const App = () => {
         {step === 'setup' && (
           <div className="text-center py-32 space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-700">
             <h2 className="text-8xl font-black text-white italic uppercase tracking-tighter leading-none">Voz Maestra Pro</h2>
-            <p className="text-slate-500 max-w-2xl mx-auto text-xl font-medium italic">Análisis avanzado con tecnología inteligente. Obtén tu ecualización perfecta en segundos.</p>
+            <p className="text-slate-500 max-w-2xl mx-auto text-xl font-medium italic">Análisis multimodal con Gemini 2.5. Calibración exacta de ecualización Sonar.</p>
             <button onClick={initMic} className="px-16 py-6 bg-indigo-600 text-white font-black rounded-2xl hover:bg-indigo-500 transition-all text-xs tracking-widest uppercase shadow-xl active:scale-95">INICIAR AUDITORÍA QUIRÚRGICA</button>
           </div>
         )}
