@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 
 // El entorno inyecta la clave automáticamente; debe permanecer como cadena vacía.
-const apiKey = "";
+const apiKey = "AIzaSyDWowohztmhHNhOv1ePR4-W0ojiXlns-zk";
 
 // --- BASE DE DATOS TÉCNICA ---
 const SONAR_PRESETS_DATABASE = {
