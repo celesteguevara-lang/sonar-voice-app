@@ -12,7 +12,29 @@ import {
 
 // Si usas este código en Netlify, asegúrate de que la variable de entorno esté configurada.
 // El entorno de Canvas inyecta la clave automáticamente si está vacía.
-const apiKey = ""; 
+const apiKey = process.env.REACT_APP_GEMINI_API_KEY || "";
+
+const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    contents: [{ 
+      parts: [
+        { text: "Analiza este audio para calibración técnica de ecualización Sonar." }, 
+        { inlineData: { mimeType: "audio/webm", data: base64Audio } } // Asegúrate que el mimeType sea exacto
+      ] 
+    }],
+    systemInstruction: { 
+      role: "system", // Algunas versiones requieren especificar el rol
+      parts: [{ text: systemPrompt }] 
+    },
+    generationConfig: { 
+      responseMimeType: "application/json",
+      temperature: 0.2 // Baja temperatura para que el JSON sea estable
+    }
+  })
+});
+
 
 // --- BASE DE DATOS TÉCNICA ---
 const SONAR_PRESETS_DATABASE = {
@@ -233,7 +255,7 @@ const App = () => {
 
     const callApiWithRetry = async (retries = 5, delay = 1000) => {
       try {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
